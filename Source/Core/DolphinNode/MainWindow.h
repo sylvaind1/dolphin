@@ -23,6 +23,7 @@ class ControllersWindow;
 class DiscordHandler;
 class DragEnterEvent;
 class FIFOPlayerWindow;
+class FreeLookWindow;
 class GameList;
 class GCTASInputWindow;
 class GraphicsWindow;
@@ -41,6 +42,7 @@ class RenderWidget;
 class SearchBar;
 class SettingsWindow;
 class ThreadWidget;
+class ToolBar;
 class WatchWidget;
 class WiiTASInputWindow;
 
@@ -115,6 +117,7 @@ public:
   void SetFullScreenResolution(bool fullscreen);
 
   void FullScreen();
+  void UnlockCursor();
   void ScreenShot();
 
   void CreateComponents();
@@ -154,6 +157,7 @@ public:
   void ShowAudioWindow();
   void ShowControllersWindow();
   void ShowGraphicsWindow();
+  void ShowFreeLookWindow();
   void ShowAboutDialog();
   void ShowHotkeyDialog();
   void ShowNetPlaySetupDialog();
@@ -197,7 +201,7 @@ public:
   QSize sizeHint() const override;
 
 private:
-#if defined(HAVE_XRANDR) && HAVE_XRANDR
+#ifdef HAVE_XRANDR
   std::unique_ptr<X11Utils::XRRConfiguration> m_xrr_config;
 #endif
 
@@ -220,6 +224,7 @@ private:
   GraphicsWindow* m_graphics_window = nullptr;
   FIFOPlayerWindow* m_fifo_window = nullptr;
   MappingWindow* m_hotkey_window = nullptr;
+  FreeLookWindow* m_freelook_window = nullptr;
 
   HotkeyScheduler* m_hotkey_scheduler;
   NetPlayDialog* m_netplay_dialog;

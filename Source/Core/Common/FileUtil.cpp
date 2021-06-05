@@ -58,14 +58,13 @@
 #endif
 
 namespace Js {
-
 std::string base_dir;
 
 void SetBaseDirectory(std::string path) {
   base_dir = std::move(path);
 }
-
 }
+
 
 // This namespace has various generic functions related to files and paths.
 // The code still needs a ton of cleanup.
@@ -801,8 +800,8 @@ std::string GetBundleDirectory()
 
 std::string GetExePath()
 {
+  // TODO: ifdef for node
   return Js::base_dir;
-
 #if 0
   static const std::string dolphin_path = [] {
     std::string result;
@@ -842,8 +841,8 @@ std::string GetExePath()
 
 std::string GetExeDirectory()
 {
+  // TODO: ifdef for node
   return Js::base_dir;
-
 #if 0
   std::string exe_path = GetExePath();
 #ifdef _WIN32
@@ -856,8 +855,8 @@ std::string GetExeDirectory()
 
 std::string GetSysDirectory()
 {
+    // TODO: ifdef for node
   return Js::base_dir + "Sys/";
-
 #if 0
   std::string sysDir;
 
@@ -966,10 +965,14 @@ static void RebuildUserDirectories(unsigned int dir_index)
   case D_CONFIG_IDX:
     s_user_paths[F_DOLPHINCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + DOLPHIN_CONFIG;
     s_user_paths[F_GCPADCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + GCPAD_CONFIG;
+    s_user_paths[F_GCKEYBOARDCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + GCKEYBOARD_CONFIG;
     s_user_paths[F_WIIPADCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + WIIPAD_CONFIG;
     s_user_paths[F_GFXCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + GFX_CONFIG;
     s_user_paths[F_DEBUGGERCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + DEBUGGER_CONFIG;
     s_user_paths[F_LOGGERCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + LOGGER_CONFIG;
+    s_user_paths[F_DUALSHOCKUDPCLIENTCONFIG_IDX] =
+        s_user_paths[D_CONFIG_IDX] + DUALSHOCKUDPCLIENT_CONFIG;
+    s_user_paths[F_FREELOOKCONFIG_IDX] = s_user_paths[D_CONFIG_IDX] + FREELOOK_CONFIG;
     break;
 
   case D_CACHE_IDX:

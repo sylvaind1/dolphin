@@ -90,7 +90,6 @@
 #endif
 
 namespace JsCallbacks {
-
 std::function<void()> on_tick;
 std::function<void()> on_state_change_begin;
 std::function<void()> on_state_change_end;
@@ -121,8 +120,8 @@ inline void CallOnStateChangeEnd() {
   if (on_state_change_end)
     on_state_change_end();
 }
-
 }
+
 
 namespace Core
 {
@@ -191,7 +190,6 @@ void OnFrameEnd()
   if (s_memory_watcher)
     s_memory_watcher->Step();
 #endif
-
   JsCallbacks::CallOnTick();
 }
 
@@ -693,11 +691,10 @@ static void EmuThread(std::unique_ptr<BootParameters> boot, WindowSystemInfo wsi
 
 void SetState(State state)
 {
+  JsCallbacks::CallOnStateChangeBegin();
   // State cannot be controlled until the CPU Thread is operational
   if (!IsRunningAndStarted())
     return;
-
-  JsCallbacks::CallOnStateChangeBegin();
 
   switch (state)
   {
@@ -727,11 +724,8 @@ void SetState(State state)
     break;
   }
 
-  if (s_on_state_changed_callback)
-    s_on_state_changed_callback(GetState());
-
-  JsCallbacks::CallOnStateChangeEnd();
   CallOnStateChangedCallbacks(GetState());
+  JsCallbacks::CallOnStateChangeEnd();
 }
 
 State GetState()
@@ -848,7 +842,6 @@ static bool PauseAndLock(bool do_lock, bool unpause_on_unlock)
 void RunAsCPUThread(std::function<void()> function)
 {
   JsCallbacks::CallOnStateChangeBegin();
-
   const bool is_cpu_thread = IsCPUThread();
   bool was_unpaused = false;
   if (!is_cpu_thread)

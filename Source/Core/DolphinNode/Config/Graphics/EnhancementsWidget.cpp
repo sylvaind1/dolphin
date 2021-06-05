@@ -20,7 +20,6 @@
 #include "DolphinNode/Config/Graphics/GraphicsSlider.h"
 #include "DolphinNode/Config/Graphics/GraphicsWindow.h"
 #include "DolphinNode/Config/Graphics/PostProcessingConfigWindow.h"
-#include "DolphinNode/QtUtils/ModalMessageBox.h"
 #include "DolphinNode/Settings.h"
 
 #include "UICommon/VideoUtils.h"

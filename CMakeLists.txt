@@ -35,15 +35,15 @@ endif()
 option(USE_SHARED_ENET "Use shared libenet if found rather than Dolphin's soon-to-compatibly-diverge version" OFF)
 option(USE_UPNP "Enables UPnP port mapping support" ON)
 option(ENABLE_NOGUI "Enable NoGUI frontend" OFF)
-option(ENABLE_QT "Enable Qt" OFF)
-option(ENABLE_NODE "Enable Node (Default)" ON)
+option(ENABLE_QT "Enable Default Qt Frontend" OFF)
+option(ENABLE_NODE "Enable Node Frontend" ON)
 option(ENABLE_LTO "Enables Link Time Optimization" OFF)
 option(ENABLE_GENERIC "Enables generic build that should run on any little-endian host" OFF)
 option(ENABLE_HEADLESS "Enables running Dolphin as a headless variant" OFF)
 option(ENABLE_ALSA "Enables ALSA sound backend" ON)
 option(ENABLE_PULSEAUDIO "Enables PulseAudio sound backend" ON)
 option(ENABLE_LLVM "Enables LLVM support, for disassembly" ON)
-option(ENABLE_TESTS "Enables building the unit tests" ON)
+option(ENABLE_TESTS "Enables building the unit tests" OFF)
 option(ENABLE_VULKAN "Enables vulkan video backend" ON)
 option(USE_DISCORD_PRESENCE "Enables Discord Rich Presence, show the current game on Discord" OFF)
 
@@ -93,7 +93,6 @@ if(UNIX)
   # Builds a relocatable binary on Linux.
   # The Sys folder will need to be copied to the Binaries folder.
   option(LINUX_LOCAL_DEV "Enable relocatable binary" OFF)
-  add_compile_options(-fPIC)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH
@@ -128,7 +127,7 @@ endif()
 # as defined above.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Binaries)
 
-if(WIN32 OR UNIX)
+if (WIN32)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/Binary)
 
   if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
@@ -281,7 +280,7 @@ else()
 
   # gcc uses some optimizations which might break stuff without this flag
   check_and_add_flag(NO_STRICT_ALIASING -fno-strict-aliasing)
-  # check_and_add_flag(NO_EXCEPTIONS -fno-exceptions)
+  check_and_add_flag(NO_EXCEPTIONS -fno-exceptions)
 
   check_and_add_flag(VISIBILITY_INLINES_HIDDEN -fvisibility-inlines-hidden)
   check_and_add_flag(VISIBILITY_HIDDEN -fvisibility=hidden)
@@ -329,10 +328,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   # Set FMT_EXCEPTIONS = 0, for consistency with -fno-exceptions earlier.
   # If we set only -fno-exceptions, fmt fails to compile when included from
   # Objective-C++ because fmt tries try to use throw because __EXCEPTIONS is defined.
-  #
-  # TODO: Only enable this for Objective-C(++).
-  # We get warnings if we enable this when building regular C(++) code.
-  # check_and_add_flag(NO_OBJC_EXCEPTIONS -fno-objc-exceptions)
   add_definitions(-DFMT_EXCEPTIONS=0)
 
   find_library(APPKIT_LIBRARY AppKit)

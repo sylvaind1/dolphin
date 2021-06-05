@@ -18,15 +18,15 @@
 #include "Common/StringUtil.h"
 #endif
 
-namespace Js {
-
-void SetBaseDirectory(std::string path);
-
-}
 #ifdef ANDROID
 #include "Common/StringUtil.h"
 #include "jni/AndroidCommon/AndroidCommon.h"
 #endif
+
+namespace Js {
+void SetBaseDirectory(std::string path);
+}
+
 
 // User directory indices for GetUserPath
 enum
