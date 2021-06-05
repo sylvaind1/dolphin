@@ -29,9 +29,9 @@
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
-#include "Common/Event.h"
 #include "Common/FileUtil.h"
 #include "Common/Flag.h"
+#include "Common/Image.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
 #include "Common/Profiler.h"
@@ -39,12 +39,13 @@
 #include "Common/Thread.h"
 #include "Common/Timer.h"
 
-#include "Core/Analytics.h"
 #include "Core/Config/NetplaySettings.h"
 #include "Core/Config/SYSCONFSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
+#include "Core/DolphinAnalytics.h"
 #include "Core/FifoPlayer/FifoRecorder.h"
+#include "Core/FreeLookConfig.h"
 #include "Core/HW/SystemTimers.h"
 #include "Core/HW/VideoInterface.h"
 #include "Core/Host.h"
@@ -64,7 +65,6 @@
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/FramebufferShaderGen.h"
 #include "VideoCommon/FreeLookCamera.h"
-#include "VideoCommon/ImageWrite.h"
 #include "VideoCommon/NetPlayChatUI.h"
 #include "VideoCommon/NetPlayGolfUI.h"
 #include "VideoCommon/OnScreenDisplay.h"
@@ -107,6 +107,12 @@ static float AspectToWidescreen(float aspect)
   return aspect * ((16.0f / 9.0f) / (4.0f / 3.0f));
 }
 
+static bool DumpFrameToPNG(const FrameDump::FrameData& frame, const std::string& file_name)
+{
+  return Common::ConvertRGBAToRGBAndSavePNG(file_name, frame.data, frame.width, frame.height,
+                                            frame.stride);
+}
+
 Renderer::Renderer(int backbuffer_width, int backbuffer_height, float backbuffer_scale,
                    AbstractTextureFormat backbuffer_format)
     : m_backbuffer_width(backbuffer_width), m_backbuffer_height(backbuffer_height),
@@ -115,10 +121,12 @@ Renderer::Renderer(int backbuffer_width, int backbuffer_height, float backbuffer
                                                                                    MAX_XFB_HEIGHT}
 {
   UpdateActiveConfig();
+  FreeLook::UpdateActiveConfig();
   UpdateDrawRectangle();
   CalculateTargetSize();
 
   m_is_game_widescreen = SConfig::GetInstance().bWii && Config::Get(Config::SYSCONF_WIDESCREEN);
+  g_freelook_camera.SetControlType(FreeLook::GetActiveConfig().camera_config.control_type);
 }
 
 Renderer::~Renderer() = default;
@@ -178,7 +186,7 @@ void Renderer::SetAndClearFramebuffer(AbstractFramebuffer* framebuffer,
 
 bool Renderer::EFBHasAlphaChannel() const
 {
-  return m_prev_efb_format == PEControl::RGBA6_Z24;
+  return m_prev_efb_format == PixelFormat::RGBA6_Z24;
 }
 
 void Renderer::ClearScreen(const MathUtil::Rectangle<int>& rc, bool colorEnable, bool alphaEnable,
@@ -190,6 +198,30 @@ void Renderer::ClearScreen(const MathUtil::Rectangle<int>& rc, bool colorEnable,
 void Renderer::ReinterpretPixelData(EFBReinterpretType convtype)
 {
   g_framebuffer_manager->ReinterpretPixelData(convtype);
+}
+
+u16 Renderer::BBoxRead(int index)
+{
+  if (!g_ActiveConfig.bBBoxEnable || !g_ActiveConfig.backend_info.bSupportsBBox)
+    return m_bounding_box_fallback[index];
+
+  return BBoxReadImpl(index);
+}
+
+void Renderer::BBoxWrite(int index, u16 value)
+{
+  if (!g_ActiveConfig.bBBoxEnable || !g_ActiveConfig.backend_info.bSupportsBBox)
+  {
+    m_bounding_box_fallback[index] = value;
+    return;
+  }
+
+  BBoxWriteImpl(index, value);
+}
+
+void Renderer::BBoxFlush()
+{
+  BBoxFlushImpl();
 }
 
 u32 Renderer::AccessEFB(EFBAccessType type, u32 x, u32 y, u32 poke_data)
@@ -204,15 +236,15 @@ u32 Renderer::AccessEFB(EFBAccessType type, u32 x, u32 y, u32 poke_data)
     // check what to do with the alpha channel (GX_PokeAlphaRead)
     PixelEngine::UPEAlphaReadReg alpha_read_mode = PixelEngine::GetAlphaReadMode();
 
-    if (bpmem.zcontrol.pixel_format == PEControl::RGBA6_Z24)
+    if (bpmem.zcontrol.pixel_format == PixelFormat::RGBA6_Z24)
     {
       color = RGBA8ToRGBA6ToRGBA8(color);
     }
-    else if (bpmem.zcontrol.pixel_format == PEControl::RGB565_Z16)
+    else if (bpmem.zcontrol.pixel_format == PixelFormat::RGB565_Z16)
     {
       color = RGBA8ToRGB565ToRGBA8(color);
     }
-    if (bpmem.zcontrol.pixel_format != PEControl::RGBA6_Z24)
+    if (bpmem.zcontrol.pixel_format != PixelFormat::RGBA6_Z24)
     {
       color |= 0xFF000000;
     }
@@ -237,18 +269,24 @@ u32 Renderer::AccessEFB(EFBAccessType type, u32 x, u32 y, u32 poke_data)
     if (!g_ActiveConfig.backend_info.bSupportsReversedDepthRange)
       depth = 1.0f - depth;
 
-    u32 ret = 0;
-    if (bpmem.zcontrol.pixel_format == PEControl::RGB565_Z16)
+    // Convert to 24bit depth
+    u32 z24depth = std::clamp<u32>(static_cast<u32>(depth * 16777216.0f), 0, 0xFFFFFF);
+
+    if (bpmem.zcontrol.pixel_format == PixelFormat::RGB565_Z16)
     {
-      // if Z is in 16 bit format you must return a 16 bit integer
-      ret = std::clamp<u32>(static_cast<u32>(depth * 65536.0f), 0, 0xFFFF);
-    }
-    else
-    {
-      ret = std::clamp<u32>(static_cast<u32>(depth * 16777216.0f), 0, 0xFFFFFF);
+      // When in RGB565_Z16 mode, EFB Z peeks return a 16bit value, which is presumably a
+      // resolved sample from the MSAA buffer.
+      // Dolphin doesn't currently emulate the 3 sample MSAA mode (and potentially never will)
+      // it just transparently upgrades the framebuffer to 24bit depth and color and whatever
+      // level of MSAA and higher Internal Resolution the user has configured.
+
+      // This is mostly transparent, unless the game does an EFB read.
+      // But we can simply convert the 24bit depth on the fly to the 16bit depth the game expects.
+
+      return CompressZ16(z24depth, bpmem.zcontrol.zformat);
     }
 
-    return ret;
+    return z24depth;
   }
 }
 
@@ -412,11 +450,9 @@ void Renderer::CheckForConfigChanges()
   const bool old_bbox = g_ActiveConfig.bBBoxEnable;
 
   UpdateActiveConfig();
+  FreeLook::UpdateActiveConfig();
 
-  if (g_ActiveConfig.bFreeLook)
-  {
-    g_freelook_camera.SetControlType(g_ActiveConfig.iFreelookControlType);
-  }
+  g_freelook_camera.SetControlType(FreeLook::GetActiveConfig().camera_config.control_type);
 
   // Update texture cache settings with any changed options.
   g_texture_cache->OnConfigChanged(g_ActiveConfig);
@@ -779,6 +815,7 @@ void Renderer::UpdateDrawRectangle()
   const float win_width = static_cast<float>(m_backbuffer_width);
   const float win_height = static_cast<float>(m_backbuffer_height);
 
+  // FIXME: this breaks at very low widget sizes
   // Make ControllerInterface aware of the render window region actually being used
   // to adjust mouse cursor inputs.
   g_controller_interface.SetAspectRatioAdjustment(draw_aspect_ratio / (win_width / win_height));
@@ -892,7 +929,9 @@ void Renderer::CheckFifoRecording()
     RecordVideoMemory();
   }
 
-  FifoRecorder::GetInstance().EndFrame(CommandProcessor::fifo.CPBase, CommandProcessor::fifo.CPEnd);
+  FifoRecorder::GetInstance().EndFrame(
+      CommandProcessor::fifo.CPBase.load(std::memory_order_relaxed),
+      CommandProcessor::fifo.CPEnd.load(std::memory_order_relaxed));
 }
 
 void Renderer::RecordVideoMemory()
@@ -1003,10 +1042,10 @@ bool Renderer::RecompileImGuiPipeline()
   pconfig.depth_state = RenderState::GetNoDepthTestingDepthState();
   pconfig.blending_state = RenderState::GetNoBlendingBlendState();
   pconfig.blending_state.blendenable = true;
-  pconfig.blending_state.srcfactor = BlendMode::SRCALPHA;
-  pconfig.blending_state.dstfactor = BlendMode::INVSRCALPHA;
-  pconfig.blending_state.srcfactoralpha = BlendMode::ZERO;
-  pconfig.blending_state.dstfactoralpha = BlendMode::ONE;
+  pconfig.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
+  pconfig.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
+  pconfig.blending_state.srcfactoralpha = SrcBlendFactor::Zero;
+  pconfig.blending_state.dstfactoralpha = DstBlendFactor::One;
   pconfig.framebuffer_state.color_texture_format = m_backbuffer_format;
   pconfig.framebuffer_state.depth_texture_format = AbstractTextureFormat::Undefined;
   pconfig.framebuffer_state.samples = 1;
@@ -1203,7 +1242,7 @@ void Renderer::UpdateWidescreenHeuristic()
     // with NON-anamorphic orthographic projections.
     // This can cause incorrect changes to 4:3 when perspective projections are temporarily not
     // shown. e.g. Animal Crossing's inventory menu.
-    // Unless we were in a sitation which was orthographically anamorphic
+    // Unless we were in a situation which was orthographically anamorphic
     // we won't consider orthographic data for changes from 16:9 to 4:3.
     m_is_game_widescreen = false;
   }
@@ -1339,10 +1378,15 @@ void Renderer::Swap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height, u6
       {
         // Remove stale EFB/XFB copies.
         g_texture_cache->Cleanup(m_frame_count);
-        Core::Callback_FramePresented();
+        const double last_speed_denominator =
+            m_fps_counter.GetDeltaTime() * VideoInterface::GetTargetRefreshRate();
+        // The denominator should always be > 0 but if it's not, just return 1
+        const double last_speed =
+            last_speed_denominator > 0.0 ? (1.0 / last_speed_denominator) : 1.0;
+        Core::Callback_FramePresented(last_speed);
       }
 
-      // Handle any config changes, this gets propogated to the backend.
+      // Handle any config changes, this gets propagated to the backend.
       CheckForConfigChanges();
       g_Config.iSaveTargetId = 0;
 
@@ -1588,8 +1632,7 @@ void Renderer::FrameDumpThreadFunc()
     {
       std::lock_guard<std::mutex> lk(m_screenshot_lock);
 
-      if (TextureToPng(frame.data, frame.stride, m_screenshot_name, frame.width, frame.height,
-                       false))
+      if (DumpFrameToPNG(frame, m_screenshot_name))
         OSD::AddMessage("Screenshot saved to " + m_screenshot_name);
 
       // Reset settings
@@ -1697,8 +1740,7 @@ bool Renderer::StartFrameDumpToImage(const FrameDump::FrameData&)
 
 void Renderer::DumpFrameToImage(const FrameDump::FrameData& frame)
 {
-  std::string filename = GetFrameDumpNextImageFileName();
-  TextureToPng(frame.data, frame.stride, filename, frame.width, frame.height, false);
+  DumpFrameToPNG(frame, GetFrameDumpNextImageFileName());
   m_frame_dump_image_counter++;
 }
 
@@ -1709,7 +1751,7 @@ bool Renderer::UseVertexDepthRange() const
     return false;
 
   // We need a full depth range if a ztexture is used.
-  if (bpmem.ztex2.type != ZTEXTURE_DISABLE && !bpmem.zcontrol.early_ztest)
+  if (bpmem.ztex2.op != ZTexOp::Disabled && !bpmem.zcontrol.early_ztest)
     return true;
 
   // If an inverted depth range is unsupported, we also need to check if the range is inverted.
@@ -1731,6 +1773,7 @@ void Renderer::DoState(PointerWrap& p)
   p.Do(m_last_xfb_width);
   p.Do(m_last_xfb_stride);
   p.Do(m_last_xfb_height);
+  p.DoArray(m_bounding_box_fallback);
 
   if (p.GetMode() == PointerWrap::MODE_READ)
   {

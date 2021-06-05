@@ -10,6 +10,7 @@
 #include <png.h>
 
 #include "Common/CommonTypes.h"
+#include "Common/IOFile.h"
 
 namespace Common
 {
@@ -47,22 +48,64 @@ bool SavePNG(const std::string& path, const u8* input, ImageByteFormat format, u
   png.width = width;
   png.height = height;
 
+  size_t byte_per_pixel;
   switch (format)
   {
   case ImageByteFormat::RGB:
     png.format = PNG_FORMAT_RGB;
+    byte_per_pixel = 3;
     break;
   case ImageByteFormat::RGBA:
     png.format = PNG_FORMAT_RGBA;
+    byte_per_pixel = 4;
     break;
   default:
     return false;
   }
 
-  png_image_write_to_file(&png, path.c_str(), 0, input, stride, nullptr);
-  if (png.warning_or_error & PNG_IMAGE_ERROR)
+  // libpng doesn't handle non-ASCII characters in path, so write in two steps:
+  // first to memory, then to file
+  std::vector<u8> buffer(byte_per_pixel * width * height);
+  png_alloc_size_t size = buffer.size();
+  int success = png_image_write_to_memory(&png, buffer.data(), &size, 0, input, stride, nullptr);
+  if (!success && size > buffer.size())
+  {
+    // initial buffer size guess was too small, set to the now-known size and retry
+    buffer.resize(size);
+    png.warning_or_error = 0;
+    success = png_image_write_to_memory(&png, buffer.data(), &size, 0, input, stride, nullptr);
+  }
+  if (!success || (png.warning_or_error & PNG_IMAGE_ERROR) != 0)
     return false;
 
-  return true;
+  File::IOFile outfile(path, "wb");
+  if (!outfile)
+    return false;
+  return outfile.WriteBytes(buffer.data(), size);
+}
+
+bool ConvertRGBAToRGBAndSavePNG(const std::string& path, const u8* input, u32 width, u32 height,
+                                int stride)
+{
+  const std::vector<u8> data = RGBAToRGB(input, width, height, stride);
+  return SavePNG(path, data.data(), ImageByteFormat::RGB, width, height);
+}
+
+std::vector<u8> RGBAToRGB(const u8* input, u32 width, u32 height, int row_stride)
+{
+  std::vector<u8> buffer;
+  buffer.reserve(width * height * 3);
+
+  for (u32 y = 0; y < height; ++y)
+  {
+    const u8* pos = input + y * row_stride;
+    for (u32 x = 0; x < width; ++x)
+    {
+      buffer.push_back(pos[x * 4]);
+      buffer.push_back(pos[x * 4 + 1]);
+      buffer.push_back(pos[x * 4 + 2]);
+    }
+  }
+  return buffer;
 }
 }  // namespace Common

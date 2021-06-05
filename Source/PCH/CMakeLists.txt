@@ -3,3 +3,5 @@ set(PCH_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set(PCH_NAME ${PCH.pch})
 target_compile_options(pch PUBLIC /Ycpch.h /Fp${PCH_DIRECTORY}/${PCH_NAME})
 target_link_libraries(pch PRIVATE fmt::fmt INTERFACE fmt::fmt)
+# fmt/format.h is included in the PCH
+target_link_libraries(pch PUBLIC fmt::fmt)
