@@ -374,16 +374,22 @@ if (MSVC)
   # Don't propogate warnings in qt headers to Dolphin
   target_compile_options(dolphin-node PRIVATE /experimental:external)
   target_compile_options(dolphin-node PRIVATE /external:W0)
-  target_compile_options(dolphin-node PRIVATE "/external:I${Qt5Gui_PRIVATE_INCLUDE_DIRS}")
-  target_compile_options(dolphin-node PRIVATE "/external:I${Qt5Widgets_PRIVATE_INCLUDE_DIRS}")
+
+  foreach(X IN LISTS Qt5Gui_PRIVATE_INCLUDE_DIRS Qt5Widgets_INCLUDE_DIRS Qt5Widgets_PRIVATE_INCLUDE_DIRS)
+    target_compile_options(dolphin-node PRIVATE "/external:I${X}")
+  endforeach()
+
+  # Remove deprecation warnings
+  target_compile_options(dolphin-node PRIVATE /Wv:18)
 endif()
 
 if(WIN32)
   target_sources(dolphin-node PRIVATE DolphinQt.manifest DolphinQt.rc)
 
   set_target_properties(dolphin-node PROPERTIES
-    DEBUG_POSTFIX    D
-    OUTPUT_NAME      Dolphin
+    PREFIX           ""
+    SUFFIX           ".node"
+    OUTPUT_NAME      dolphin
     WIN32_EXECUTABLE TRUE
   )
 

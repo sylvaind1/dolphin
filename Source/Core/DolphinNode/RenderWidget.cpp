@@ -38,6 +38,7 @@
 #include "VideoCommon/VideoConfig.h"
 
 #ifdef _WIN32
+#include <Windows.h>
 #include <WinUser.h>
 #include <windef.h>
 #endif
